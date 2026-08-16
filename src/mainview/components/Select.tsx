@@ -72,6 +72,7 @@ interface ListboxProps {
 	options: SelectOption[];
 	value: string;
 	activeIndex: number;
+	grow?: boolean;
 	renderOption?: (option: SelectOption) => ReactNode;
 	onHover: (index: number) => void;
 	onPick: (index: number) => void;
@@ -102,6 +103,7 @@ function SelectListbox({
 	options,
 	value,
 	activeIndex,
+	grow,
 	renderOption,
 	onHover,
 	onPick,
@@ -124,7 +126,11 @@ function SelectListbox({
 		const panel = panelRef.current;
 		if (!panel) return;
 		const a = anchor.getBoundingClientRect();
-		const height = panel.getBoundingClientRect().height;
+		const rect = panel.getBoundingClientRect();
+		const height = rect.height;
+		// A grown panel is wider than the trigger, so the edge check has to use the
+		// panel's own width — the trigger's would let it run off screen.
+		const width = Math.max(a.width, rect.width);
 		const pad = 8;
 		let top = a.bottom + 4;
 		if (top + height > window.innerHeight - pad) {
@@ -132,7 +138,7 @@ function SelectListbox({
 			top = above >= pad ? above : Math.max(pad, window.innerHeight - pad - height);
 		}
 		let left = a.left;
-		if (left + a.width > window.innerWidth - pad) left = window.innerWidth - a.width - pad;
+		if (left + width > window.innerWidth - pad) left = window.innerWidth - width - pad;
 		if (left < pad) left = pad;
 		setPos({ top, left, width: a.width });
 		setMeasured(true);
@@ -247,7 +253,11 @@ function SelectListbox({
 	const panelClass = `bg-overlay border border-edge-active rounded-lg shadow-xl shadow-black/50 origin-top ${
 		reducedMotion ? "" : "transition-[opacity,transform] duration-150"
 	} ${entered ? "opacity-100 scale-100" : "opacity-0 scale-[0.98]"}`;
-	const panelStyle = { position: "fixed" as const, top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 };
+	// `grow`: the trigger's width is a floor, not the width. A dropdown narrower
+	// than its own rows makes every row a two-line block or an ellipsis.
+	const panelStyle = grow
+		? { position: "fixed" as const, top: pos.top, left: pos.left, minWidth: pos.width, width: "max-content", maxWidth: "min(26rem, 92vw)", zIndex: 9999 }
+		: { position: "fixed" as const, top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 };
 
 	if (!search) {
 		return createPortal(
@@ -294,7 +304,7 @@ function Select({
 	options,
 	onChange,
 	renderOption,
-	renderValue,
+	growList,
 	onOptionDisabledClick,
 	searchable,
 	allowCustom,
@@ -311,11 +321,9 @@ function Select({
 	options: SelectOption[];
 	onChange: (value: string) => void;
 	renderOption?: (option: SelectOption) => ReactNode;
-	/** How the *selected* option is drawn on the trigger. Defaults to
-	 *  `renderOption`, which is right until a row is taller than one line: the
-	 *  trigger is one row in a fixed grid, so a two-line option would make this
-	 *  field taller than the fields beside it. */
-	renderValue?: (option: SelectOption) => ReactNode;
+	/** Let the open list be wider than the trigger, up to a cap. For a field whose
+	 *  rows carry a caption the trigger has no room for. */
+	growList?: boolean;
 	/** Called when a `disabled` option is clicked (instead of `onChange`). */
 	onOptionDisabledClick?: (value: string) => void;
 	/** Show a filter field inside the panel. Implied by `allowCustom`. */
@@ -492,7 +500,7 @@ function Select({
 			>
 				<span className={`truncate ${selected ? "" : "text-fg-muted"}`}>
 					{selected
-						? ((renderValue ?? renderOption) && !selected.custom ? (renderValue ?? renderOption)!(selected) : selected.label)
+						? (renderOption && !selected.custom ? renderOption(selected) : selected.label)
 						: (placeholder ?? "")}
 				</span>
 				<svg
@@ -518,6 +526,7 @@ function Select({
 					options={rowOptions}
 					value={value}
 					activeIndex={activeIndex}
+					grow={growList}
 					renderOption={renderOption}
 					onHover={setActiveIndex}
 					onPick={commitOption}

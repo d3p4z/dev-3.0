@@ -133,8 +133,12 @@ export function unconnectedRecommendations(
 
 /** Group label the seeded presets carry, and the marker that says an agent has
  *  already been seeded. One constant so the picker, the seeder and the
- *  idempotency check cannot drift apart. */
-export const SEEDED_GROUP_LABEL = "Open Source";
+ *  idempotency check cannot drift apart.
+ *
+ *  Not named after the licence: "open source" describes where the weights came
+ *  from, which is not why anyone picks this. What it promises is the same job
+ *  for a fraction of the money. */
+export const SEEDED_GROUP_LABEL = "Best value";
 
 /**
  * Add the recommendations to the catalog under an existing provider.

@@ -33,9 +33,11 @@ export interface AgentConfigSelection {
 // breakpoint: the picker sizes to its dialog column, not to the window. Every
 // occurrence is written out in full — Tailwind only scans literal classes.
 
+// Model gets half again the width of its neighbours: its rows carry a caption
+// (the provider, or a price and what it replaces) that the other two never have.
 const FIELD_COLS_WITH_FAVORITES =
-	"[@container_(min-width:34rem)]:grid-cols-[3.75rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]";
-const FIELD_COLS = "[@container_(min-width:34rem)]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]";
+	"[@container_(min-width:34rem)]:grid-cols-[3.75rem_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]";
+const FIELD_COLS = "[@container_(min-width:34rem)]:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]";
 
 /** The picker's own field rails. */
 export function pickerFieldsGridClass(withFavorites: boolean): string {
@@ -201,6 +203,11 @@ function AgentConfigPicker({
 	const currentGroupLabel = groupLabelForConfig(selectedAgent, configId) ?? groups[0]?.label ?? "";
 	const currentGroup = groups.find((g) => g.label === currentGroupLabel) ?? groups[0];
 	const modeConfigs = currentGroup?.configs ?? [];
+	// A preset whose "model" is a set of role bindings is the only one with
+	// anything to edit here — everything else pins one model dev3 does not own.
+	const selectedIsRoleBound = modeConfigs.some(
+		(config) => config.modelRoles && Object.keys(config.modelRoles).length > 0,
+	);
 
 	function handleProviderChange(nextAgentId: string | null) {
 		// Reset config to the new harness's default (which also picks its default
@@ -308,6 +315,11 @@ function AgentConfigPicker({
 					<label htmlFor={`${idPrefix}-model`} className={labelClass}>
 						{t("launch.model")}
 					</label>
+					{/* The pencil sits beside the field, not inside the list: it edits the
+					    preset that is currently selected, and a row in the list is not
+					    selected until it is clicked. Only for a preset whose "model" is a
+					    set of role bindings — there is nothing else to change. */}
+					<div className="flex items-center gap-1.5 min-w-0">
 					<Select
 						id={`${idPrefix}-model`}
 						value={currentGroupLabel}
@@ -330,10 +342,10 @@ function AgentConfigPicker({
 						]}
 						onChange={handleModelChange}
 						onOptionDisabledClick={handleGatedConfigClick}
-						renderValue={(option) => {
-							// One line on the trigger: it sits in a grid row with Harness and
-							// Mode, and a second line would make this field taller than both.
-							const caption = providerCaptions.get(option.value);
+						growList
+						renderOption={(option) => {
+							const offered = lockedByLabel.get(option.value);
+							const caption = offered ? lockedCaption(offered, t) : providerCaptions.get(option.value);
 							return (
 								<span className="flex items-baseline gap-1.5 min-w-0">
 									<span className="truncate">{option.label}</span>
@@ -341,20 +353,27 @@ function AgentConfigPicker({
 								</span>
 							);
 						}}
-						renderOption={(option) => {
-							const offered = lockedByLabel.get(option.value);
-							// The caption gets its own line. Beside the name it wins the space
-							// — both captions are longer than what they annotate — and the
-							// model name is what the user is actually reading for.
-							const caption = offered ? lockedCaption(offered, t) : providerCaptions.get(option.value);
-							return (
-								<span className="flex flex-col min-w-0">
-									<span className="truncate">{option.label}</span>
-									{caption ? <span className="text-fg-3 text-micro truncate">{caption}</span> : null}
-								</span>
-							);
-						}}
 					/>
+					{selectedIsRoleBound && (
+						<button
+							type="button"
+							data-testid={`${idPrefix}-edit-models`}
+							title={t("launch.editModels")}
+							aria-label={t("launch.editModels")}
+							onClick={() =>
+								window.dispatchEvent(
+									new CustomEvent(OPEN_SETTINGS_SECTION_EVENT, { detail: "agents-editor" }),
+								)
+							}
+							className="h-[34px] w-[34px] flex items-center justify-center shrink-0 bg-elevated rounded-lg border border-edge text-fg-3 hover:text-fg hover:border-edge-active transition-colors outline-none"
+						>
+							<svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+								<path d="M12 20h9" />
+								<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+							</svg>
+						</button>
+					)}
+					</div>
 				</div>
 
 				{/* Mode */}

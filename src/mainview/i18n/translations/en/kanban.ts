@@ -231,6 +231,7 @@ const kanban = {
 	"launch.modelSectionBuiltin": "On your subscription",
 	"launch.modelSectionOpenSource": "Cheap open-source · needs a key",
 	"launch.lockedCaption": "{price}/M vs {builtin}",
+	"launch.editModels": "Change the models behind this preset",
 	"launch.connectProvider": "+ Connect a provider…",
 	"launch.mode": "Mode",
 	"launch.variantGroup": "Variant {n}",

@@ -260,36 +260,28 @@ describe("section headings", () => {
 	});
 });
 
-describe("the trigger versus the rows", () => {
-	function ValueHarness() {
-		return (
-			<Select
-				value="a"
-				options={[{ value: "a", label: "Alpha" }, { value: "b", label: "Beta" }]}
-				onChange={() => {}}
-				renderOption={(o) => <span>{o.label} in the list</span>}
-				renderValue={(o) => <span>{o.label} on the trigger</span>}
-			/>
-		);
+describe("growList", () => {
+	function widthOf(): { width: string; minWidth: string } {
+		const panel = document.querySelector("[role=listbox]") as HTMLElement;
+		return { width: panel.style.width, minWidth: panel.style.minWidth };
 	}
 
-	it("draws the selected option with renderValue, and the rows with renderOption", async () => {
+	it("keeps the panel pinned to the trigger's width by default", async () => {
 		const user = userEvent.setup();
-		render(<ValueHarness />);
-		// The trigger is the only thing on screen before it opens.
-		expect(screen.getByText("Alpha on the trigger")).toBeTruthy();
-		expect(screen.queryByText("Alpha in the list")).toBeNull();
-
+		render(<Select value="a" options={[{ value: "a", label: "Alpha" }]} onChange={() => {}} />);
 		await user.click(screen.getByRole("combobox"));
-		expect(screen.getByText("Alpha in the list")).toBeTruthy();
-		expect(screen.getByText("Beta in the list")).toBeTruthy();
+		// The measured trigger width, not a keyword. (jsdom measures 0.)
+		expect(widthOf().width).not.toBe("max-content");
+		expect(widthOf().minWidth).toBe("");
 	});
 
-	it("falls back to renderOption on the trigger when no renderValue is given", async () => {
-		render(
-			<Select value="a" options={[{ value: "a", label: "Alpha" }]} onChange={() => {}}
-				renderOption={(o) => <span>{o.label} everywhere</span>} />,
-		);
-		expect(screen.getByText("Alpha everywhere")).toBeTruthy();
+	it("lets the panel grow past the trigger when asked, with the trigger as the floor", async () => {
+		const user = userEvent.setup();
+		render(<Select value="a" options={[{ value: "a", label: "Alpha" }]} onChange={() => {}} growList />);
+		await user.click(screen.getByRole("combobox"));
+		const { width, minWidth } = widthOf();
+		expect(width).toBe("max-content");
+		// The floor is set from the trigger, so a short list still fills the field.
+		expect(minWidth).not.toBe("");
 	});
 });

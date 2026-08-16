@@ -241,6 +241,7 @@ const kanban = {
 	"launch.modelSectionBuiltin": "По подписке",
 	"launch.modelSectionOpenSource": "Дешёвые open-source · нужен ключ",
 	"launch.lockedCaption": "{price}/M вместо {builtin}",
+	"launch.editModels": "Поменять модели в этом пресете",
 	"launch.connectProvider": "+ Подключить провайдера…",
 	"launch.mode": "Режим",
 	"launch.variantGroup": "Вариант {n}",

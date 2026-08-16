@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_AGENTS, type ModelCatalogView } from "../../../shared/types";
 import { I18nProvider } from "../../i18n";
 import AgentConfigPicker from "../AgentConfigPicker";
+import { OPEN_SETTINGS_SECTION_EVENT } from "../../state";
 
 const modelCatalogGet = vi.fn<() => Promise<ModelCatalogView>>();
 const modelCatalogSave = vi.fn();
@@ -106,5 +107,57 @@ describe("AgentConfigPicker — models the user has not connected", () => {
 		await user.click(screen.getByLabelText("Model"));
 		await user.click(screen.getByText("Qwen3.8 2.4T"));
 		expect(await screen.findByTestId("connect-provider-modal")).toBeTruthy();
+	});
+});
+
+describe("editing the models behind a routed preset", () => {
+	const routed = {
+		...claude,
+		configurations: [
+			...claude.configurations,
+			{ id: "seeded", name: "Best value", groupLabel: "Best value", modelRoles: { opus: "m1" } },
+		],
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		modelCatalogGet.mockResolvedValue({
+			providers: [{ id: "p1", kind: "openrouter", label: "OpenRouter", hasKey: true }],
+			models: [{ id: "m1", providerId: "p1", name: "ds-pro", modelId: "deepseek/deepseek-v4-pro-0813" }],
+		});
+	});
+
+	it("offers the pencil only while a role-bound preset is selected", async () => {
+		const { rerender } = render(
+			<I18nProvider>
+				<AgentConfigPicker idPrefix="t" agents={[routed]} agentId={routed.id} configId="seeded" onChange={() => {}} />
+			</I18nProvider>,
+		);
+		expect(await screen.findByTestId("t-edit-models")).toBeTruthy();
+
+		// A built-in model pins one model dev3 does not own: nothing to edit.
+		rerender(
+			<I18nProvider>
+				<AgentConfigPicker idPrefix="t" agents={[routed]} agentId={routed.id} configId={claude.defaultConfigId!} onChange={() => {}} />
+			</I18nProvider>,
+		);
+		expect(screen.queryByTestId("t-edit-models")).toBeNull();
+	});
+
+	it("sends the user to the preset editor rather than changing the launch", async () => {
+		const user = userEvent.setup();
+		const onChange = vi.fn();
+		const opened = vi.fn((e: Event) => (e as CustomEvent).detail);
+		window.addEventListener(OPEN_SETTINGS_SECTION_EVENT, opened);
+		render(
+			<I18nProvider>
+				<AgentConfigPicker idPrefix="t" agents={[routed]} agentId={routed.id} configId="seeded" onChange={onChange} />
+			</I18nProvider>,
+		);
+		await user.click(await screen.findByTestId("t-edit-models"));
+		window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, opened);
+		expect(opened).toHaveBeenCalled();
+		expect(opened.mock.results[0].value).toBe("agents-editor");
+		expect(onChange).not.toHaveBeenCalled();
 	});
 });

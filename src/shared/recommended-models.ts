@@ -44,6 +44,17 @@ export interface RecommendedModel {
  * cheap AND competent: the model holding the plan is the one that matters, so
  * it gets a real model rather than the cheapest one available.
  */
+/**
+ * Bump this — in the same commit — whenever the list below changes in a way an
+ * existing user should hear about: a model added, removed, or moved to another
+ * role. A seeded preset remembers the revision it was built from, and a preset
+ * behind the current one is what the "new models are out" prompt is looking for.
+ *
+ * Do NOT bump for a label, blurb, or price correction: nothing the user runs
+ * changes, and the prompt is a promise that something did.
+ */
+export const RECOMMENDED_REVISION = 1;
+
 export const RECOMMENDED_MODELS: RecommendedModel[] = [
 	{
 		providerKind: "openrouter",
@@ -210,7 +221,14 @@ export function seedPresetForAgent(
 	// Named after the group, not after the preset it was cloned from: that name
 	// carries the old model ("Auto (Opus 5, Medium)"), which is exactly what this
 	// preset no longer uses. The mode label is derived from the fields anyway.
-	return { ...rest, id: newId(), name: SEEDED_GROUP_LABEL, groupLabel: SEEDED_GROUP_LABEL, modelRoles };
+	return {
+		...rest,
+		id: newId(),
+		name: SEEDED_GROUP_LABEL,
+		groupLabel: SEEDED_GROUP_LABEL,
+		modelRoles,
+		seededRevision: RECOMMENDED_REVISION,
+	};
 }
 
 /** Every agent with its seeded preset appended, agents that cannot be routed
@@ -220,4 +238,127 @@ export function seedAgentPresets(agents: CodingAgent[], catalog: ModelCatalogVie
 		const preset = seedPresetForAgent(agent, catalog, newId);
 		return preset ? { ...agent, configurations: [...agent.configurations, preset] } : agent;
 	});
+}
+
+// ---------------------------------------------------------------- update ---
+
+/**
+ * Keeping an already-seeded user current with a newer curated list.
+ *
+ * Never silently: a seeded preset is what their sessions run on, and swapping
+ * the models under it changes both the bill and the quality of the work. dev3
+ * computes what it WOULD change, shows both sides, and only writes on approval.
+ * Declining is answered the same way accepting is — by stamping the revision, so
+ * the same question is never asked twice.
+ */
+
+/** The provider the recommendations live under: the one already serving them,
+ *  else any OpenRouter provider (the only kind the curated ids belong to).
+ *  Null when the user has nothing that could serve them. */
+function recommendedProviderId(catalog: ModelCatalogView): string | null {
+	const ids = new Set(RECOMMENDED_MODELS.map((model) => model.modelId));
+	const serving = catalog.models.find((model) => ids.has(model.modelId));
+	if (serving) return serving.providerId;
+	return catalog.providers.find((provider) => provider.kind === "openrouter")?.id ?? null;
+}
+
+/**
+ * The catalog the current revision needs — today's catalog plus whatever models
+ * this revision added. Pure: nothing is saved, and the caller shows the diff
+ * before deciding. Null when no provider can serve them.
+ */
+export function catalogForCurrentRevision(catalog: ModelCatalogView, newId: () => string): ModelCatalogView | null {
+	const providerId = recommendedProviderId(catalog);
+	return providerId ? seedCatalogModels(catalog, providerId, newId) : null;
+}
+
+/** One role that would change, in the words the modal shows. */
+export interface RoleChange {
+	roleId: string;
+	/** Catalog model name bound today, null when the role is unbound. */
+	from: string | null;
+	/** Catalog model name it would be bound to. */
+	to: string;
+}
+
+/** One preset the current revision has something to say about. */
+export interface PresetUpdate {
+	agentId: string;
+	agentName: string;
+	configId: string;
+	presetName: string;
+	/** Roles whose binding would actually change — never the unchanged ones. */
+	changes: RoleChange[];
+	/** The full binding to write on approval, changed roles and all. */
+	modelRoles: Record<string, string>;
+}
+
+/**
+ * Seeded presets that are behind the current revision AND would genuinely end
+ * up on different models.
+ *
+ * `catalog` must be the one from `catalogForCurrentRevision` — the new models
+ * are not in the saved catalog yet, and binding resolves through it.
+ *
+ * A preset the user re-bound by hand is still listed: its own bindings are what
+ * `from` shows, so the modal says out loud what would be replaced instead of
+ * quietly deciding for them.
+ */
+export function pendingPresetUpdates(agents: CodingAgent[], catalog: ModelCatalogView): PresetUpdate[] {
+	const nameById = new Map(catalog.models.map((model) => [model.id, model.name]));
+	const updates: PresetUpdate[] = [];
+	for (const agent of agents) {
+		for (const config of agent.configurations) {
+			if (config.groupLabel !== SEEDED_GROUP_LABEL) continue;
+			if ((config.seededRevision ?? 0) >= RECOMMENDED_REVISION) continue;
+			const modelRoles = bindingsForAgent(agent, catalog);
+			if (!modelRoles) continue;
+			const changes: RoleChange[] = [];
+			for (const [roleId, catalogId] of Object.entries(modelRoles)) {
+				const current = config.modelRoles?.[roleId];
+				if (current === catalogId) continue;
+				changes.push({
+					roleId,
+					from: current ? nameById.get(current) ?? null : null,
+					to: nameById.get(catalogId) ?? catalogId,
+				});
+			}
+			if (changes.length === 0) continue;
+			updates.push({
+				agentId: agent.id,
+				agentName: agent.name,
+				configId: config.id,
+				presetName: config.name,
+				changes,
+				modelRoles,
+			});
+		}
+	}
+	return updates;
+}
+
+/** The agents with those presets rebound and stamped with the revision. */
+export function applyPresetUpdates(agents: CodingAgent[], updates: PresetUpdate[]): CodingAgent[] {
+	const byConfig = new Map(updates.map((update) => [update.configId, update]));
+	return agents.map((agent) => ({
+		...agent,
+		configurations: agent.configurations.map((config) => {
+			const update = byConfig.get(config.id);
+			return update
+				? { ...config, modelRoles: update.modelRoles, seededRevision: RECOMMENDED_REVISION }
+				: config;
+		}),
+	}));
+}
+
+/** Same presets, same models — only the revision moves. What declining writes:
+ *  the user has now seen this revision, and the question is answered. */
+export function markRevisionSeen(agents: CodingAgent[], updates: PresetUpdate[]): CodingAgent[] {
+	const configIds = new Set(updates.map((update) => update.configId));
+	return agents.map((agent) => ({
+		...agent,
+		configurations: agent.configurations.map((config) =>
+			configIds.has(config.id) ? { ...config, seededRevision: RECOMMENDED_REVISION } : config,
+		),
+	}));
 }

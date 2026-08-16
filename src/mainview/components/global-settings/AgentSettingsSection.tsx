@@ -36,6 +36,7 @@ import {
 	providersForAgent,
 } from "../../../shared/llm-provider";
 import { buildCommandPreview } from "./utils";
+import type { SettingsPresetTarget } from "../../state";
 
 /** One star, recoloured per state: outline = not a favorite, filled = favorite.
  *  Inline SVG rather than a Nerd Font glyph, which renders as tofu until the
@@ -66,6 +67,12 @@ interface AgentSettingsSectionProps {
 	onDefaultConfigChange: (configId: string) => void;
 	/** Fresh settings after a favorite toggle, so the stars re-render. */
 	onGlobalSettingsChange: (settings: GlobalSettings) => void;
+	/** A preset a deep-link wants shown: selected, revealed on narrow viewports,
+	 *  and scrolled into view inside the list's own scroll box. */
+	focusPreset?: SettingsPresetTarget | null;
+	/** Fired once the target has been applied — or once it is certain the preset
+	 *  no longer exists — so the caller can drop it. */
+	onFocusPresetHandled?: () => void;
 }
 
 /** What the library's one detail pane is showing: the agent itself, or one of
@@ -80,6 +87,8 @@ export default function AgentSettingsSection({
 	onDefaultAgentChange,
 	onDefaultConfigChange,
 	onGlobalSettingsChange,
+	focusPreset,
+	onFocusPresetHandled,
 }: AgentSettingsSectionProps) {
 	const toggleFavorite = useToggleFavorite(onGlobalSettingsChange);
 	const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
@@ -87,6 +96,7 @@ export default function AgentSettingsSection({
 	const [presetQuery, setPresetQuery] = useState("");
 	/** Narrow viewports show one pane at a time; wide ones show both. */
 	const [narrowShowsEditor, setNarrowShowsEditor] = useState(false);
+	const [scrollToConfigId, setScrollToConfigId] = useState<string | null>(null);
 	const [agentAvailability, setAgentAvailability] = useState<AgentCheckResult[]>(
 		[],
 	);
@@ -126,6 +136,37 @@ export default function AgentSettingsSection({
 	useEffect(() => {
 		loadAgentAvailability();
 	}, [loadAgentAvailability]);
+
+	// Point the library at the preset a deep-link named. The agents arrive from
+	// an RPC, so an empty list means "not loaded yet" — waiting is the difference
+	// between landing on the preset and landing on whatever was selected before.
+	useEffect(() => {
+		if (!focusPreset || agents.length === 0) return;
+		const agent = agents.find((item) => item.id === focusPreset.agentId);
+		const config = agent?.configurations.find((item) => item.id === focusPreset.configId);
+		if (agent && config) {
+			setActiveAgentId(agent.id);
+			setSelection({ kind: "preset", configId: config.id });
+			// A filter left over from an earlier visit can hide the very row this
+			// jump exists to show.
+			setPresetQuery("");
+			setNarrowShowsEditor(true);
+			setScrollToConfigId(config.id);
+		}
+		// Deleted preset: nothing to select, and the page it lives on is already
+		// open — the jump is spent either way.
+		onFocusPresetHandled?.();
+	}, [agents, focusPreset, onFocusPresetHandled]);
+
+	// Runs after the row has rendered under its (possibly cleared) filter.
+	// `nearest` scrolls the list's own box; `start` would drag the whole settings
+	// page along with it.
+	useEffect(() => {
+		if (!scrollToConfigId) return;
+		const row = document.querySelector(`[data-preset-row="${scrollToConfigId}"]`) as HTMLElement | null;
+		row?.scrollIntoView?.({ block: "nearest" });
+		setScrollToConfigId(null);
+	}, [scrollToConfigId, groups]);
 
 	function persistAgents(updated: CodingAgent[]) {
 		// Persistence is immediate (§8) — a rejected write used to vanish silently.
@@ -402,6 +443,7 @@ export default function AgentSettingsSection({
 													key={config.id}
 													type="button"
 													role="option"
+													data-preset-row={config.id}
 													aria-selected={isSelected}
 													onClick={() => selectPreset(config.id)}
 													className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-sm transition-colors border ${

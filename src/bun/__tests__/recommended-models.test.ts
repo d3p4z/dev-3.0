@@ -1,6 +1,11 @@
 import {
 	CLAUDE_ROLE_BUILTIN_MODEL,
 	RECOMMENDED_MODELS,
+	RECOMMENDED_REVISION,
+	applyPresetUpdates,
+	catalogForCurrentRevision,
+	markRevisionSeen,
+	pendingPresetUpdates,
 	SEEDED_GROUP_LABEL,
 	recommendedClaudeRoleModelIds,
 	recommendedCodexRoleModelIds,
@@ -200,5 +205,127 @@ describe("seeding a freshly connected provider", () => {
 		const gemini: CodingAgent = { ...claudeAgent(), id: "gemini", baseCommand: "gemini" };
 		const [out] = seedAgentPresets([gemini], seedCatalogModels(emptyCatalog, "p1", newId), newId);
 		expect(out).toEqual(gemini);
+	});
+});
+
+describe("keeping an already-seeded user current", () => {
+	let n = 0;
+	const newId = () => `new-${++n}`;
+	beforeEach(() => {
+		n = 0;
+	});
+
+	const provider = { id: "p1", kind: "openrouter" as const, label: "OpenRouter", hasKey: true };
+
+	/** A user seeded by an older revision: the preset is stamped behind the
+	 *  current one and its catalog is missing what the new revision added. */
+	function oldWorld() {
+		const catalog: ModelCatalogView = {
+			providers: [provider],
+			models: [{ id: "m-old", providerId: "p1", name: "legacy", modelId: "legacy/model" }],
+		};
+		const agent: CodingAgent = {
+			id: "claude",
+			name: "Claude Code",
+			baseCommand: "claude",
+			defaultConfigId: "c1",
+			configurations: [
+				{ id: "c1", name: "Default", model: "claude-opus-5[1m]" },
+				{
+					id: "seeded",
+					name: SEEDED_GROUP_LABEL,
+					groupLabel: SEEDED_GROUP_LABEL,
+					modelRoles: { fable: "m-old", opus: "m-old", sonnet: "m-old", haiku: "m-old" },
+					seededRevision: RECOMMENDED_REVISION - 1,
+				},
+			],
+		};
+		return { catalog, agent };
+	}
+
+	it("proposes the models this revision added, without saving them first", () => {
+		const { catalog, agent } = oldWorld();
+		const proposed = catalogForCurrentRevision(catalog, newId)!;
+		// The saved catalog is untouched — the user has not agreed to anything.
+		expect(catalog.models).toHaveLength(1);
+		expect(proposed.models.length).toBe(1 + RECOMMENDED_MODELS.length);
+
+		const [update] = pendingPresetUpdates([agent], proposed);
+		expect(update.configId).toBe("seeded");
+		expect(update.changes.map((c) => c.roleId).sort()).toEqual(["fable", "haiku", "opus", "sonnet"]);
+		// Both sides named, so the modal can show what is being replaced.
+		expect(update.changes.every((c) => c.from === "legacy")).toBe(true);
+		expect(update.changes.map((c) => c.to)).toContain("ds-pro");
+	});
+
+	it("says nothing about a preset already on the current revision", () => {
+		const { catalog, agent } = oldWorld();
+		const current = {
+			...agent,
+			configurations: agent.configurations.map((c) =>
+				c.id === "seeded" ? { ...c, seededRevision: RECOMMENDED_REVISION } : c,
+			),
+		};
+		const proposed = catalogForCurrentRevision(catalog, newId)!;
+		expect(pendingPresetUpdates([current], proposed)).toEqual([]);
+	});
+
+	it("says nothing about a preset the user built themselves", () => {
+		const { catalog, agent } = oldWorld();
+		const mine = {
+			...agent,
+			configurations: agent.configurations.map((c) =>
+				c.id === "seeded" ? { ...c, groupLabel: "My own mix" } : c,
+			),
+		};
+		expect(pendingPresetUpdates([mine], catalogForCurrentRevision(catalog, newId)!)).toEqual([]);
+	});
+
+	it("says nothing when the bindings already match, even at an old revision", () => {
+		const { catalog, agent } = oldWorld();
+		const proposed = catalogForCurrentRevision(catalog, newId)!;
+		const [update] = pendingPresetUpdates([agent], proposed);
+		const rebound = applyPresetUpdates([agent], [update]);
+		expect(pendingPresetUpdates(rebound, proposed)).toEqual([]);
+	});
+
+	it("has nothing to propose when no provider could serve the models", () => {
+		expect(catalogForCurrentRevision({ providers: [], models: [] }, newId)).toBeNull();
+	});
+
+	it("rebinds and stamps on approval", () => {
+		const { catalog, agent } = oldWorld();
+		const proposed = catalogForCurrentRevision(catalog, newId)!;
+		const updates = pendingPresetUpdates([agent], proposed);
+		const [out] = applyPresetUpdates([agent], updates);
+		const seeded = out.configurations.find((c) => c.id === "seeded")!;
+		expect(seeded.seededRevision).toBe(RECOMMENDED_REVISION);
+		expect(seeded.modelRoles).toEqual(updates[0].modelRoles);
+		// Everything else the user has is left exactly where it was.
+		expect(out.configurations.find((c) => c.id === "c1")).toEqual(agent.configurations[0]);
+	});
+
+	it("stamps but changes nothing when the answer is no, so the question is asked once", () => {
+		const { catalog, agent } = oldWorld();
+		const proposed = catalogForCurrentRevision(catalog, newId)!;
+		const updates = pendingPresetUpdates([agent], proposed);
+		const [out] = markRevisionSeen([agent], updates);
+		const seeded = out.configurations.find((c) => c.id === "seeded")!;
+		expect(seeded.modelRoles).toEqual(agent.configurations[1].modelRoles);
+		expect(seeded.seededRevision).toBe(RECOMMENDED_REVISION);
+		expect(pendingPresetUpdates([out], proposed)).toEqual([]);
+	});
+
+	it("stamps a freshly seeded preset, so a new user is never asked about the set they just took", () => {
+		const catalog = seedCatalogModels({ providers: [provider], models: [] }, "p1", newId);
+		const agent: CodingAgent = {
+			id: "claude",
+			name: "Claude Code",
+			baseCommand: "claude",
+			defaultConfigId: "c1",
+			configurations: [{ id: "c1", name: "Default" }],
+		};
+		const [seededAgent] = seedAgentPresets([agent], catalog, newId);
+		expect(pendingPresetUpdates([seededAgent], catalog)).toEqual([]);
 	});
 });

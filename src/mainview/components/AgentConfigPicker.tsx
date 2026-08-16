@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import type { AgentCheckResult, CodingAgent, FavoriteAgentConfig } from "../../shared/types";
+import { useMemo, useRef, useState } from "react";
+import type { AgentCheckResult, AgentConfiguration, CodingAgent, FavoriteAgentConfig } from "../../shared/types";
 import { isFavorite } from "../../shared/favorites";
 import { useT } from "../i18n";
 import { OPEN_SETTINGS_SECTION_EVENT } from "../state";
@@ -20,9 +20,16 @@ import {
 	prettifyModel,
 } from "../utils/agentPicker";
 import { useModelCatalog } from "../hooks/useModelCatalog";
-import { CLAUDE_ROLE_BUILTIN_MODEL, type RecommendedModel } from "../../shared/recommended-models";
+import {
+	CLAUDE_ROLE_BUILTIN_MODEL,
+	catalogForCurrentRevision,
+	pendingPresetUpdates,
+	type RecommendedModel,
+} from "../../shared/recommended-models";
 import { resolveModelRate } from "../../shared/agent-pricing";
+import { randomUUID } from "../uuid";
 import ConnectProviderModal from "./ConnectProviderModal";
+import RecommendedUpdateModal from "./RecommendedUpdateModal";
 
 export interface AgentConfigSelection {
 	agentId: string | null;
@@ -156,6 +163,10 @@ function AgentConfigPicker({
 	const [catalogVersion, setCatalogVersion] = useState(0);
 	const catalog = useModelCatalog(catalogVersion);
 	const [connectOpen, setConnectOpen] = useState(false);
+	const [updateOpen, setUpdateOpen] = useState(false);
+	// The answer is saved on the spot, but `agents` is a prop: a surface that
+	// loaded it once would keep showing a notice the user has already dealt with.
+	const [revisionAnswered, setRevisionAnswered] = useState(false);
 	// Favorites popover (anchored to the leading star trigger). Per-picker so the
 	// global list is never duplicated across variant rows (decision 125).
 	// Escape closes the favorites menu before the surrounding modal: the menu is
@@ -205,8 +216,26 @@ function AgentConfigPicker({
 	const modeConfigs = currentGroup?.configs ?? [];
 	// A preset whose "model" is a set of role bindings is the only one with
 	// anything to edit here — everything else pins one model dev3 does not own.
-	const selectedIsRoleBound = modeConfigs.some(
-		(config) => config.modelRoles && Object.keys(config.modelRoles).length > 0,
+	// The pencil opens THIS record, so it has to be a record: the one selected
+	// when that is the role-bound one, else the group's first.
+	const roleBound = (config: AgentConfiguration) =>
+		!!config.modelRoles && Object.keys(config.modelRoles).length > 0;
+	const editablePreset =
+		modeConfigs.find((config) => config.id === configId && roleBound(config)) ?? modeConfigs.find(roleBound);
+	// dev3's curated set moves with releases. The notice appears only on the
+	// preset it would rewrite, and only where that preset is about to be used —
+	// a banner on every surface would be an ad for our own opinion.
+	const revision = useMemo(() => {
+		if (!catalog) return null;
+		const next = catalogForCurrentRevision(catalog, randomUUID);
+		if (!next) return null;
+		const updates = pendingPresetUpdates(agents, next);
+		return updates.length > 0 ? { catalog: next, updates } : null;
+	}, [agents, catalog]);
+	const revisionTouchesSelection = !!(
+		editablePreset &&
+		!revisionAnswered &&
+		revision?.updates.some((update) => update.configId === editablePreset.id)
 	);
 
 	function handleProviderChange(nextAgentId: string | null) {
@@ -354,18 +383,24 @@ function AgentConfigPicker({
 							);
 						}}
 					/>
-					{selectedIsRoleBound && (
+					{editablePreset && selectedAgent && (
 						<button
 							type="button"
 							data-testid={`${idPrefix}-edit-models`}
 							title={t("launch.editModels")}
 							aria-label={t("launch.editModels")}
 							onClick={() =>
-								// A CATEGORY, not the `agents-editor` entry id: the event
-								// resolves anything else to the first category, silently, so a
-								// wrong value here lands the user on Appearance.
+								// `section` is a CATEGORY, not the `agents-editor` entry id: the
+								// event resolves anything else to the first category, silently,
+								// so a wrong value here lands the user on Appearance. `preset`
+								// is what turns "the Agents page" into "this preset, selected".
 								window.dispatchEvent(
-									new CustomEvent(OPEN_SETTINGS_SECTION_EVENT, { detail: "agents" }),
+									new CustomEvent(OPEN_SETTINGS_SECTION_EVENT, {
+										detail: {
+											section: "agents",
+											preset: { agentId: selectedAgent.id, configId: editablePreset.id },
+										},
+									}),
 								)
 							}
 							className="h-[34px] w-[34px] flex items-center justify-center shrink-0 bg-elevated rounded-lg border border-edge text-fg-3 hover:text-fg hover:border-edge-active transition-colors outline-none"
@@ -402,6 +437,23 @@ function AgentConfigPicker({
 				<div className="col-span-full min-w-0 empty:hidden">
 					<AgentAccountIndicator agent={selectedAgent} value={accountId} onSelect={onAccountChange} />
 				</div>
+
+				{/* Its own full-width line under the fields: it is about the selection as
+				    a whole, and it must not squeeze the Model field it sits below. */}
+				{revisionTouchesSelection && (
+					<button
+						type="button"
+						data-testid={`${idPrefix}-recommended-update`}
+						onClick={() => setUpdateOpen(true)}
+						className="col-span-full min-w-0 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-warning/5 border border-warning/20 text-left hover:border-warning/40 transition-colors"
+					>
+						<span className="text-warning text-xs shrink-0">&#9888;</span>
+						<span className="text-fg-2 text-xs truncate">{t("recommendedUpdate.notice")}</span>
+						<span className="text-accent text-xs font-medium shrink-0 ml-auto">
+							{t("recommendedUpdate.review")}
+						</span>
+					</button>
+				)}
 			</div>
 
 			{showFavorites && favMenuOpen && favCaretRef.current && (
@@ -432,6 +484,19 @@ function AgentConfigPicker({
 				<ConnectProviderModal
 					onClose={() => setConnectOpen(false)}
 					onConnected={() => setCatalogVersion((v) => v + 1)}
+				/>
+			)}
+
+			{updateOpen && revision && (
+				<RecommendedUpdateModal
+					updates={revision.updates}
+					catalog={revision.catalog}
+					agentCommands={Object.fromEntries(agents.map((agent) => [agent.id, agent.baseCommand]))}
+					onClose={() => setUpdateOpen(false)}
+					onApplied={() => {
+						setRevisionAnswered(true);
+						setCatalogVersion((v) => v + 1);
+					}}
 				/>
 			)}
 		</div>

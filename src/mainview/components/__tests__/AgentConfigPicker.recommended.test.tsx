@@ -6,6 +6,7 @@ import { I18nProvider } from "../../i18n";
 import AgentConfigPicker from "../AgentConfigPicker";
 import { OPEN_SETTINGS_SECTION_EVENT } from "../../state";
 import { isSettingsCategoryId } from "../../settings-registry";
+import { RECOMMENDED_REVISION } from "../../../shared/recommended-models";
 
 const modelCatalogGet = vi.fn<() => Promise<ModelCatalogView>>();
 const modelCatalogSave = vi.fn();
@@ -158,10 +159,103 @@ describe("editing the models behind a routed preset", () => {
 		await user.click(await screen.findByTestId("t-edit-models"));
 		window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, opened);
 		expect(opened).toHaveBeenCalled();
+		const detail = opened.mock.results[0].value as { section: string; preset: { agentId: string; configId: string } };
 		// A category id. Anything else resolves to the first category, so this
 		// assertion is the only thing standing between the pencil and Appearance.
-		expect(opened.mock.results[0].value).toBe("agents");
-		expect(isSettingsCategoryId(opened.mock.results[0].value)).toBe(true);
+		expect(detail.section).toBe("agents");
+		expect(isSettingsCategoryId(detail.section)).toBe(true);
+		// And the record itself: a section alone lands the user on a page full of
+		// presets with no idea which one the pencil meant.
+		expect(detail.preset).toEqual({ agentId: routed.id, configId: "seeded" });
 		expect(onChange).not.toHaveBeenCalled();
+	});
+});
+
+describe("a curated list that moved on after the user was seeded", () => {
+	// No `seededRevision`: seeded before dev3 started stamping them, which is
+	// exactly the population this prompt exists for.
+	const stale = {
+		...claude,
+		configurations: [
+			...claude.configurations,
+			{ id: "seeded", name: "Best value", groupLabel: "Best value", modelRoles: { opus: "m1" } },
+		],
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		modelCatalogGet.mockResolvedValue({
+			providers: [{ id: "p1", kind: "openrouter", label: "OpenRouter", hasKey: true }],
+			models: [{ id: "m1", providerId: "p1", name: "ds-pro", modelId: "deepseek/deepseek-v4-pro-0813" }],
+		});
+		modelCatalogSave.mockResolvedValue({ providers: [], models: [] });
+		getAgents.mockResolvedValue([stale]);
+		saveAgents.mockResolvedValue(undefined);
+	});
+
+	it("says so on the preset it would rewrite, and nowhere else", async () => {
+		const { rerender } = render(
+			<I18nProvider>
+				<AgentConfigPicker idPrefix="t" agents={[stale]} agentId={stale.id} configId="seeded" onChange={() => {}} />
+			</I18nProvider>,
+		);
+		expect(await screen.findByTestId("t-recommended-update")).toBeTruthy();
+
+		rerender(
+			<I18nProvider>
+				<AgentConfigPicker idPrefix="t" agents={[stale]} agentId={stale.id} configId={claude.defaultConfigId!} onChange={() => {}} />
+			</I18nProvider>,
+		);
+		expect(screen.queryByTestId("t-recommended-update")).toBeNull();
+	});
+
+	it("changes nothing until the user approves, then writes both sides", async () => {
+		const user = userEvent.setup();
+		render(
+			<I18nProvider>
+				<AgentConfigPicker idPrefix="t" agents={[stale]} agentId={stale.id} configId="seeded" onChange={() => {}} />
+			</I18nProvider>,
+		);
+		await user.click(await screen.findByTestId("t-recommended-update"));
+		// Both sides of every changing role are on screen — that is the consent.
+		// `ds-pro` is bound already, so it is NOT here: an unchanged role is not a
+		// change, and listing it would inflate what the user is agreeing to.
+		expect(await screen.findByTestId("recommended-update-modal")).toBeTruthy();
+		expect(screen.getAllByText("qwen3.8").length).toBeGreaterThan(0);
+		expect(screen.queryByText("ds-pro")).toBeNull();
+		expect(modelCatalogSave).not.toHaveBeenCalled();
+		expect(saveAgents).not.toHaveBeenCalled();
+
+		await user.click(screen.getByTestId("recommended-update-apply"));
+		await waitFor(() => expect(saveAgents).toHaveBeenCalled());
+		// The models have to be in the catalog before a preset may point at them.
+		const savedCatalog = modelCatalogSave.mock.calls[0][0].catalog as ModelCatalogView;
+		expect(savedCatalog.models.map((m) => m.modelId)).toContain("qwen/qwen3.8-2.4t-a95b");
+		const savedAgents = saveAgents.mock.calls[0][0].agents as typeof DEFAULT_AGENTS;
+		const seeded = savedAgents[0].configurations.find((c) => c.id === "seeded")!;
+		expect(Object.keys(seeded.modelRoles!).sort()).toEqual(["fable", "haiku", "opus", "sonnet"]);
+		expect(seeded.seededRevision).toBe(RECOMMENDED_REVISION);
+		// The answer is saved, but this surface was handed its agents as a prop:
+		// without dropping the notice itself it would go on asking.
+		await waitFor(() => expect(screen.queryByTestId("t-recommended-update")).toBeNull());
+	});
+
+	it("takes no for an answer without touching the catalog or the models", async () => {
+		const user = userEvent.setup();
+		render(
+			<I18nProvider>
+				<AgentConfigPicker idPrefix="t" agents={[stale]} agentId={stale.id} configId="seeded" onChange={() => {}} />
+			</I18nProvider>,
+		);
+		await user.click(await screen.findByTestId("t-recommended-update"));
+		await user.click(await screen.findByTestId("recommended-update-keep"));
+
+		await waitFor(() => expect(saveAgents).toHaveBeenCalled());
+		expect(modelCatalogSave).not.toHaveBeenCalled();
+		const savedAgents = saveAgents.mock.calls[0][0].agents as typeof DEFAULT_AGENTS;
+		const seeded = savedAgents[0].configurations.find((c) => c.id === "seeded")!;
+		// Their models stay theirs; only the "you have been asked" stamp moves.
+		expect(seeded.modelRoles).toEqual({ opus: "m1" });
+		expect(seeded.seededRevision).toBe(RECOMMENDED_REVISION);
 	});
 });

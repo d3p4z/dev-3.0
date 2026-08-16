@@ -45,7 +45,7 @@ import PxpipeProxySettingsSection from "./global-settings/PxpipeProxySettingsSec
 import SystemSettingsSection from "./global-settings/SystemSettingsSection";
 import TerminalSettingsSection from "./global-settings/TerminalSettingsSection";
 import WorkspaceSettingsSection from "./global-settings/WorkspaceSettingsSection";
-import type { SettingsSectionId } from "../state";
+import type { SettingsPresetTarget, SettingsSectionId } from "../state";
 import { useNarrowViewport } from "../hooks/useNarrowViewport";
 import { CAROUSEL_MAX_WIDTH } from "./MobileBoardCarousel";
 import {
@@ -80,7 +80,10 @@ interface SettingChangeOptions extends PersistOptions {
 	};
 }
 
-function GlobalSettings({ section }: { section?: SettingsSectionId } = {}) {
+function GlobalSettings({
+	section,
+	preset,
+}: { section?: SettingsSectionId; preset?: SettingsPresetTarget } = {}) {
 	const t = useT();
 	const [locale, setLocale] = useLocale();
 	const injectedThemeState = getWindowInjectedThemeState();
@@ -124,6 +127,11 @@ function GlobalSettings({ section }: { section?: SettingsSectionId } = {}) {
 	);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
+	// A deep-link that names a preset, held until the agents list has loaded and
+	// the Agents page has actually pointed at it. One-shot: leaving it set would
+	// yank the selection back on every later visit to this screen.
+	const [focusPreset, setFocusPreset] = useState<SettingsPresetTarget | null>(preset ?? null);
+	const clearFocusPreset = useCallback(() => setFocusPreset(null), []);
 	const detailHeadingRef = useRef<HTMLHeadingElement>(null);
 
 	const resetTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -495,6 +503,15 @@ function GlobalSettings({ section }: { section?: SettingsSectionId } = {}) {
 		if (!narrow) setMobileCategory(null);
 	}, [narrow]);
 
+	// A named preset also scrolls the page to the editor that holds it — landing
+	// on the right category and leaving the user to scroll is most of the way to
+	// not having deep-linked at all.
+	useEffect(() => {
+		if (!preset) return;
+		setFocusPreset(preset);
+		setPendingAnchor("agents-editor");
+	}, [preset]);
+
 	useEffect(() => {
 		if (!pendingAnchor || searchQuery.trim()) return;
 		const element = document.querySelector(
@@ -699,6 +716,8 @@ function GlobalSettings({ section }: { section?: SettingsSectionId } = {}) {
 							onDefaultAgentChange={handleDefaultAgentChange}
 							onDefaultConfigChange={handleDefaultConfigChange}
 							onGlobalSettingsChange={setGlobalSettings}
+							focusPreset={focusPreset}
+							onFocusPresetHandled={clearFocusPreset}
 						/>
 						<AgentRateLimitSettingsSection
 							t={t}

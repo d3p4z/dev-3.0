@@ -397,6 +397,14 @@ export interface AgentConfiguration {
 	 * the launch goes through the proxy sidecar; when absent, nothing changes.
 	 */
 	modelRoles?: Record<string, string>;
+	/**
+	 * Which revision of dev3's curated recommendations this preset was seeded
+	 * from, and — after the user answered the "new models are out" prompt — the
+	 * newest revision they have already seen. Stamped on decline as well as on
+	 * accept: the question is "has this user been asked about revision N", and
+	 * asking twice is nagging.
+	 */
+	seededRevision?: number;
 }
 
 export interface CodingAgent {

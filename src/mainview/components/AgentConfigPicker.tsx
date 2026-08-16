@@ -361,8 +361,11 @@ function AgentConfigPicker({
 							title={t("launch.editModels")}
 							aria-label={t("launch.editModels")}
 							onClick={() =>
+								// A CATEGORY, not the `agents-editor` entry id: the event
+								// resolves anything else to the first category, silently, so a
+								// wrong value here lands the user on Appearance.
 								window.dispatchEvent(
-									new CustomEvent(OPEN_SETTINGS_SECTION_EVENT, { detail: "agents-editor" }),
+									new CustomEvent(OPEN_SETTINGS_SECTION_EVENT, { detail: "agents" }),
 								)
 							}
 							className="h-[34px] w-[34px] flex items-center justify-center shrink-0 bg-elevated rounded-lg border border-edge text-fg-3 hover:text-fg hover:border-edge-active transition-colors outline-none"

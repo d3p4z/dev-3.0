@@ -5,6 +5,7 @@ import { DEFAULT_AGENTS, type ModelCatalogView } from "../../../shared/types";
 import { I18nProvider } from "../../i18n";
 import AgentConfigPicker from "../AgentConfigPicker";
 import { OPEN_SETTINGS_SECTION_EVENT } from "../../state";
+import { isSettingsCategoryId } from "../../settings-registry";
 
 const modelCatalogGet = vi.fn<() => Promise<ModelCatalogView>>();
 const modelCatalogSave = vi.fn();
@@ -157,7 +158,10 @@ describe("editing the models behind a routed preset", () => {
 		await user.click(await screen.findByTestId("t-edit-models"));
 		window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, opened);
 		expect(opened).toHaveBeenCalled();
-		expect(opened.mock.results[0].value).toBe("agents-editor");
+		// A category id. Anything else resolves to the first category, so this
+		// assertion is the only thing standing between the pencil and Appearance.
+		expect(opened.mock.results[0].value).toBe("agents");
+		expect(isSettingsCategoryId(opened.mock.results[0].value)).toBe(true);
 		expect(onChange).not.toHaveBeenCalled();
 	});
 });

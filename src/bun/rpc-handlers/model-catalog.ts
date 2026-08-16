@@ -31,6 +31,7 @@ function toView(catalog: ModelCatalog, keys: Record<string, string>): ModelCatal
 			kind: p.kind,
 			label: p.label,
 			baseUrl: p.baseUrl,
+			apiFormat: p.apiFormat,
 			hasKey: Boolean(keys[p.id]),
 		})),
 		models: catalog.models.map((m) => ({ ...m })),
@@ -39,7 +40,13 @@ function toView(catalog: ModelCatalog, keys: Record<string, string>): ModelCatal
 
 function fromView(view: ModelCatalogView): ModelCatalog {
 	return {
-		providers: view.providers.map((p) => ({ id: p.id, kind: p.kind, label: p.label, baseUrl: p.baseUrl })),
+		providers: view.providers.map((p) => ({
+			id: p.id,
+			kind: p.kind,
+			label: p.label,
+			baseUrl: p.baseUrl,
+			apiFormat: p.apiFormat,
+		})),
 		models: view.models.map((m) => ({ ...m })),
 	};
 }

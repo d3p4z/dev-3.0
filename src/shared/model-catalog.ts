@@ -33,7 +33,20 @@ export interface CatalogProvider {
 	label: string;
 	/** Required for `custom`; ignored for the known kinds. */
 	baseUrl?: string;
+	/**
+	 * Which wire protocol a `custom` endpoint speaks. Ignored for the known
+	 * kinds, which speak their own. Defaults to `openai`, because that is what
+	 * every custom provider was before this field existed — an absent value must
+	 * keep meaning exactly what it meant on disk.
+	 */
+	apiFormat?: CustomApiFormat;
 }
+
+/** The request shapes dev3 can put in front of a custom endpoint. Both are
+ *  proxied by the sidecar; the agent still only ever talks to the proxy. */
+export type CustomApiFormat = "openai" | "anthropic";
+
+export const CUSTOM_API_FORMATS: CustomApiFormat[] = ["openai", "anthropic"];
 
 /** One named model: the user's own name bound to exactly one provider and one
  *  provider-native model id. The name is what travels on the wire. */
@@ -198,12 +211,20 @@ export function buildSidecarConfig(catalog: ModelCatalog, dataDir = "."): Sideca
 			// The base URL is written literally: an `env.` reference is honoured for
 			// key VALUES only, and the sidecar then dials the placeholder itself.
 			entry.network_config = { base_url: provider.baseUrl ?? "", ...NETWORK_CONFIG };
+			// Absent means the OpenAI shape: that is what every custom provider
+			// saved before this field existed, and rereading one must not change
+			// which protocol it speaks.
+			const format: CustomApiFormat = provider.apiFormat ?? "openai";
 			entry.custom_provider_config = {
-				base_provider_type: "openai",
+				base_provider_type: format,
 				// Partial `allowed_requests` means "everything not listed is denied",
 				// so the Responses pair must be spelled out — Codex speaks nothing else.
+				// The operation names do NOT change with the format: the sidecar's own
+				// anthropic profile maps all four onto `/v1/messages`. It declares no
+				// listing path there, so asking the endpoint what it offers is an
+				// OpenAI-only affordance.
 				allowed_requests: {
-					list_models: true,
+					list_models: format === "openai",
 					chat_completion: true,
 					chat_completion_stream: true,
 					responses: true,

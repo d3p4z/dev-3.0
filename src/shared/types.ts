@@ -1081,6 +1081,8 @@ export interface ModelCatalogView {
 		kind: "openai" | "anthropic" | "openrouter" | "custom";
 		label: string;
 		baseUrl?: string;
+		/** Wire protocol of a `custom` endpoint; absent means OpenAI-shaped. */
+		apiFormat?: "openai" | "anthropic";
 		hasKey: boolean;
 	}[];
 	models: { id: string; providerId: string; name: string; modelId: string }[];

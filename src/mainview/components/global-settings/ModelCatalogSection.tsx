@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CodingAgent, ModelCatalogView, ModelSidecarStatus } from "../../../shared/types";
 import {
 	CATALOG_PROVIDER_KINDS,
+	CUSTOM_API_FORMATS,
 	isValidCatalogModelName,
 	sidecarProviderKey,
 	validateCatalog,
 	type CatalogProviderKind,
+	type CustomApiFormat,
 } from "../../../shared/model-catalog";
 import { randomUUID } from "../../uuid";
 import Select, { type SelectOption } from "../Select";
@@ -398,15 +400,31 @@ export default function ModelCatalogSection({ t }: { t: TFunction }) {
 											className={INPUT_CLASS}
 										/>
 										{provider.kind === "custom" ? (
-											<input
-												id={`provider-url-${provider.id}`}
-												type="url"
-												aria-label={t("catalog.providerBaseUrl")}
-												value={provider.baseUrl ?? ""}
-												placeholder="https://llm.example.com/v1"
-												onChange={(event) => patchProvider(provider.id, { baseUrl: event.target.value })}
-												className={`${INPUT_CLASS} font-mono mt-1.5`}
-											/>
+											<>
+												<input
+													id={`provider-url-${provider.id}`}
+													type="url"
+													aria-label={t("catalog.providerBaseUrl")}
+													value={provider.baseUrl ?? ""}
+													placeholder="https://llm.example.com/v1"
+													onChange={(event) => patchProvider(provider.id, { baseUrl: event.target.value })}
+													className={`${INPUT_CLASS} font-mono mt-1.5`}
+												/>
+												{/* Absent means OpenAI-shaped, which is what every custom
+												    provider saved before this control existed. */}
+												<div className="mt-1.5">
+												<Select
+													id={`provider-format-${provider.id}`}
+													ariaLabel={t("connect.apiFormatLabel")}
+													value={provider.apiFormat ?? "openai"}
+													options={CUSTOM_API_FORMATS.map((format) => ({
+														value: format,
+														label: t(`connect.apiFormat.${format}` as Parameters<TFunction>[0]),
+													}))}
+													onChange={(value) => patchProvider(provider.id, { apiFormat: value as CustomApiFormat })}
+												/>
+												</div>
+											</>
 										) : null}
 										<span className="block text-fg-muted text-xs font-mono mt-1 truncate">
 											{sidecarProviderKey(provider)}/…

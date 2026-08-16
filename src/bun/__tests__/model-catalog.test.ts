@@ -101,6 +101,44 @@ describe("buildSidecarConfig", () => {
 		expect(custom.network_config?.base_url).toBe("https://llm.example.com/v1");
 	});
 
+	it("still reads a provider saved before the format field existed as OpenAI-shaped", () => {
+		// Every custom provider already on disk has no apiFormat. Reading one must
+		// not quietly move it onto a protocol its endpoint does not speak.
+		const stored = catalog();
+		expect(stored.providers.find((p) => p.kind === "custom")?.apiFormat).toBeUndefined();
+		expect(
+			buildSidecarConfig(stored).providers["custom-my-box"].custom_provider_config?.base_provider_type,
+		).toBe("openai");
+	});
+
+	it("declares an Anthropic-shaped endpoint under the same operation names, which the sidecar maps to /v1/messages", () => {
+		const base = catalog();
+		const anthropic = {
+			...base,
+			providers: base.providers.map((p) => (p.kind === "custom" ? { ...p, apiFormat: "anthropic" as const } : p)),
+		};
+		const custom = buildSidecarConfig(anthropic).providers["custom-my-box"];
+		expect(custom.custom_provider_config?.base_provider_type).toBe("anthropic");
+		// The operations keep their OpenAI names — renaming them to a Messages-ish
+		// key denies every request, because unlisted means denied.
+		expect(custom.custom_provider_config?.allowed_requests.chat_completion).toBe(true);
+		expect(custom.custom_provider_config?.allowed_requests.responses).toBe(true);
+	});
+
+	it("does not claim an Anthropic endpoint can list its models, because that profile declares no listing path", () => {
+		const base = catalog();
+		const anthropic = {
+			...base,
+			providers: base.providers.map((p) => (p.kind === "custom" ? { ...p, apiFormat: "anthropic" as const } : p)),
+		};
+		expect(
+			buildSidecarConfig(anthropic).providers["custom-my-box"].custom_provider_config?.allowed_requests.list_models,
+		).toBe(false);
+		expect(
+			buildSidecarConfig(base).providers["custom-my-box"].custom_provider_config?.allowed_requests.list_models,
+		).toBe(true);
+	});
+
 	it("allows the Responses protocol on a custom endpoint, because Codex speaks nothing else", () => {
 		const allowed = buildSidecarConfig(catalog()).providers["custom-my-box"].custom_provider_config?.allowed_requests;
 		expect(allowed?.responses).toBe(true);

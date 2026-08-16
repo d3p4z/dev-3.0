@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import type { CatalogProviderKind } from "../../shared/model-catalog";
+import { CUSTOM_API_FORMATS, type CatalogProviderKind, type CustomApiFormat } from "../../shared/model-catalog";
 import { RECOMMENDED_MODELS, seedAgentPresets, seedCatalogModels } from "../../shared/recommended-models";
 import { useT } from "../i18n";
 import { api } from "../rpc";
@@ -76,6 +76,9 @@ export default function ConnectProviderModal({ onClose, onConnected }: { onClose
 	const [target, setTarget] = useState<ConnectTarget | null>(null);
 	const [key, setKey] = useState("");
 	const [baseUrl, setBaseUrl] = useState("");
+	// Only asked for a hand-entered endpoint: the named services all speak one
+	// known shape, and asking about it would be a question with one right answer.
+	const [apiFormat, setApiFormat] = useState<CustomApiFormat>("openai");
 	const [busy, setBusy] = useState(false);
 
 	useEscapeKey(onClose);
@@ -93,7 +96,14 @@ export default function ConnectProviderModal({ onClose, onConnected }: { onClose
 			const withProvider = {
 				providers: [
 					...catalog.providers,
-					{ id: providerId, kind: target.kind, label: target.label, baseUrl: target.kind === "custom" ? url : undefined, hasKey: false },
+					{
+						id: providerId,
+						kind: target.kind,
+						label: target.label,
+						baseUrl: target.kind === "custom" ? url : undefined,
+						apiFormat: target.kind === "custom" ? apiFormat : undefined,
+						hasKey: false,
+					},
 				],
 				models: catalog.models,
 			};
@@ -172,16 +182,39 @@ export default function ConnectProviderModal({ onClose, onConnected }: { onClose
 					) : (
 						<>
 							{target.kind === "custom" && !target.baseUrl ? (
-								<label className="block">
-									<span className="block text-fg-2 text-xs mb-1">{t("connect.baseUrlLabel")}</span>
-									<input
-										type="url"
-										value={baseUrl}
-										placeholder="https://llm.example.com/v1"
-										onChange={(e) => setBaseUrl(e.target.value)}
-										className={`${INPUT_CLASS} font-mono`}
-									/>
-								</label>
+								<>
+									<label className="block">
+										<span className="block text-fg-2 text-xs mb-1">{t("connect.baseUrlLabel")}</span>
+										<input
+											type="url"
+											value={baseUrl}
+											placeholder="https://llm.example.com/v1"
+											onChange={(e) => setBaseUrl(e.target.value)}
+											className={`${INPUT_CLASS} font-mono`}
+										/>
+									</label>
+									{/* Asked only for a hand-entered endpoint. The named services
+									    each speak one known shape, so the question would have one
+									    right answer and no reason to be on screen. */}
+									<fieldset className="block">
+										<legend className="block text-fg-2 text-xs mb-1">{t("connect.apiFormatLabel")}</legend>
+										<div className="flex flex-wrap gap-4">
+											{CUSTOM_API_FORMATS.map((format) => (
+												<label key={format} className="flex items-center gap-2 text-fg-2 text-sm">
+													<input
+														type="radio"
+														name="connect-api-format"
+														value={format}
+														checked={apiFormat === format}
+														onChange={() => setApiFormat(format)}
+													/>
+													{t(`connect.apiFormat.${format}` as Parameters<typeof t>[0])}
+												</label>
+											))}
+										</div>
+										<span className="block text-fg-3 text-xs mt-1.5">{t("connect.apiFormatHint")}</span>
+									</fieldset>
+								</>
 							) : null}
 
 							{target.needsKey ? (
